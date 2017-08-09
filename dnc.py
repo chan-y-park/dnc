@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 
 DNC_NUM_READ_MODES = 3
@@ -13,82 +14,148 @@ class DNCLSTMController:
     ):
         return h_t, new_states
 
-def build_dnc_state():
+
+def get_linear_outputs(
+    inputs,
+    outputs_shape,
+    initializer,
+    name,
+):
+    # inputs: [B, controller_output_size]
+    inputs_size = inputs.shape.as_list()[-1]
+    linear_size = np.prod(outputs_shape)
+    with tf.variable_scope(name):
+        W = tf.get_variable(
+            name='kernel',
+            shape=[inputs_size, linear_size],
+            initializer=variable_initializer(),
+        )
+        b = tf.get_variable(
+            name='bias',
+            shape=[linear_size],
+            initializer=tf.zeros_initializer(),
+        )
+        linear_outputs = tf.nn.xw_plus_b(
+            inputs, W, b,
+        )
+        outputs = tf.reshape(
+            linear_outputs,
+            shape=([-1] + outputs_shape),
+            name=name,
+        )
+    return outputs
+
+
+def build_dnc_state(
+    controller_outputs,
+#    minibatch_size,
+    num_read_heads,
+    num_write_heads,
+    width_memory_row,
+    num_memory_row,
+    variable_initializer,
+):
+#    B = minibatch_size
+    N = num_memory_row
+    W = width_memory_row
+    R = num_read_heads
+    E = num_write_heads
+
     state_dict = {}
     with tf.variable_scope('interface_parameters'):
         # k^{r, i}_t
-        state_dict['read_keys'] = tf.get_variable(
+        state_dict['read_keys'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[R, W],
+            initializer=variable_initializer(),
             name='read_keys',
-            shape=[R, W],
-            initializer=self._get_variable_initializer(),
         )
         # \hat{beta}^{r, i}_t
-        state_dict['read_strengths_pre_oneplus'] = tf.get_variable(
-            name='read_strength_pre_oneplus',
+        state_dict['read_strengths_pre_oneplus'] = get_linear_outpus(
+            controller_outputs,
             shape=[R],
-            initializer=self._get_variable_initializer(),
+            initializer=variable_initializer(),
+            name='read_strength_pre_oneplus',
         )
         state_dict['read_strengths'] = oneplus(
-            self._read_strengths_pre_oneplus,
+            state_dict['read_strengths_pre_oneplus']
             name='read_strengths',
         )
         # k^{w}_t
-        state_dict['write_key'] = tf.get_variable(
+        state_dict['write_key'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[W],
+            initializer=variable_initializer(),
             name='write_key',
-            shape=[W],
-            initializer=self._get_variable_initializer(),
         )
         # \hat{beta}^{w}_t
-        state_dict['write_strength_pre_oneplus'] = tf.get_variable(
+        state_dict['write_strength_pre_oneplus'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[E],
+            initializer=variable_initializer(),
             name='write_strength_pre_oneplus',
-            shape=[R],
-            initializer=self._get_variable_initializer(),
         )
         state_dict['write_strength'] = oneplus(
-            self._write_strength_pre_oneplus,
-            name='write_strengths',
+            state_dict['write_strength_pre_oneplus']
+            name='write_strength',
         )
         # \hat{e}_t
-        state_dict['erase_pre_sigmoid'] = tf.get_variable(
+        state_dict['erase_pre_sigmoid'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[W],
+            initializer=variable_initializer(),
             name='erase_pre_sigmoid',
-            shape=[W],
-            initializer=self._get_variable_initializer(),
         )
         state_dict['erase'] = tf.sigmoid(
-            self._erase_pre_sigmoid,
+            state_dict['erase_pre_sigmoid'],
             name='erase',
         )
         # \nu_t
-        state_dict['write'] = tf.get_variable(
-            name='write',
-            shape=[W],
+        state_dict['write'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[W],
             initializer=self._get_variable_initializer(),
+            name='write',
         )
         # f^i_t
-        state_dict['free_gates_pre_sigmoid'] = tf.get_variable(
-            name='free_gates_pre_sigmoid',
-            shape=[R],
+        state_dict['free_gates_pre_sigmoid'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[R],
             initializer=self._get_variable_initializer(),
+            name='free_gates_pre_sigmoid',
         )
         state_dict['free_gates'] = tf.sigmoid(
             self._free_gates_pre_sigmoid,
             name='free_gates',
         )
         # g^a_t
-        state_dict['allocation_gate_pre_sigmoid'] = tf.get_variable(
-            name='allocation_gate_pre_sigmoid',
-            shape=[],
-            initializer=self._get_variable_initializer(),
+        state_dict['allocation_gates_pre_sigmoid'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[E],
+            initializer=variable_initializer(),
+            name='allocation_gates_pre_sigmoid',
         )
-        state_dict['allocation_gate'] = tf.sigmoid(
-            self._allocation_gate_pre_sigmoid,
-            name='allocation_gate',
+        state_dict['allocation_gates'] = tf.sigmoid(
+            state_dict['allocation_gates_pre_sigmoid'],
+            name='allocation_gates',
+        )
+        # g^w_t
+        state_dict['write_gates_pre_sigmoid'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[E],
+            initializer=get_variable_initializer(),
+            name='write_gates_pre_sigmoid',
+        )
+        state_dict['write_gates'] = tf.sigmoid(
+            state_dict['write_gates_pre_sigmoid'],
+            name='write_gates',
         )
         # pi^i_t
-        state_dict['read_modes_pre_softmax'] = tf.get_variable(
-            name='read_modes_pre_softmax',
-            shape=[R, DNC_NUM_READ_MODES],
+        state_dict['read_modes_pre_softmax'] = get_linear_outpus(
+            controller_outputs,
+            outputs_shape=[R, DNC_NUM_READ_MODES],
             initializer=self._get_variable_initializer(),
+            name='read_modes_pre_softmax',
         )
         state_dict['read_modes'] = tf.nn.softmax(
             self._read_modes_pre_softmax,
@@ -145,6 +212,61 @@ def build_dynamic_memory_allocation(
     return allocation_weightings
 
 
+def get_content_weightings(keys, memory, strengths, name=None):
+    # keys: [-1, num_heads, W]
+    # memory: [-1, N, W]
+    # strengths: [-1, num_heads]
+
+    # numerator: [-1, num_heads, N]
+    numerator = tf.matmul(
+        keys,
+        memory,
+    )
+    keys_norm = tf.sqrt(
+        tf.norm(
+            keys,
+            axis=2,
+        )
+    )
+    memory_norm = tf.sqrt(
+        tf.norm(
+            memory,
+            axis=2,
+        )
+    )
+    denominator = tf.einsum(
+        'bh,bn->bhn',
+        keys_norm,
+        memory_norm,
+    ) + EPSILON
+
+    # cosine_similarity: [-1, num_heads, N]
+    cosine_similarity = numerator / denominator
+    
+    content_weighting_logits = tf.einsum(
+        'bhn,bh->bn',
+        cosine_similarity,
+        strengths,
+    )
+    content_weightings = tf.softmax(
+        content_weighting_logits,
+        name=name,
+    )
+    return content_weightings
+
+
+def get_write_weighting(
+    allocation_gates,
+    write_gates,
+    allocation_weightings,
+    write_content_weightings,
+)
+    write_weightings = (
+        write_gates 
+        * (allocation_gates * allocation_weightings
+           + (1 - allocation_gates) * write_content_weightgins)
+    )
+    return write_weightings
 
 # TODO: Rewrite as a subclass of an RNN class.
 class DifferentiableNeuralComputer:
@@ -188,7 +310,7 @@ class DifferentiableNeuralComputer:
         with tf.variable_scope('controller') as scope:
             # TODO: Use LSTMBlockCell.
             self._controller = tf.nn.rnn_cell.LSTMCell(
-                num_units=,
+                num_units=self._config['controller_num_units'],
             )
             controller_zero_state = self._controller(
                 batch_size=,
@@ -202,10 +324,16 @@ class DifferentiableNeuralComputer:
             scope.reuse_variables()
 
         with tf.variable_scope('new_state'):
-            self._new_state = build_dnc_state()
+            self._new_state = build_dnc_state(
+                num_read_heads=R,
+                num_write_heads=1,
+                width_memory_row=W,
+                num_memory_row=N,
+                variable_initializer=self._get_variable_initializer,
+            )
 
         with tf.variable_scope('dynamic_memory_allocation')
-            self._new_state['allocation_weightings'] = (
+            allocation_weightings = (
                 build_dynamic_memory_allocation(
                     self._prev_state['read_weightings'],
                     self._prev_state['usages'],
@@ -213,7 +341,21 @@ class DifferentiableNeuralComputer:
                 )
             )
 
-        with tf.variable_scope('write_weightinh')
+        write_content_weightings = get_content_weightings(
+            tf.expand_dims(self._new_state['write_keys'],
+            self._memory,
+            self._new_state['write_strengths'],
+            name='write_content_weightings',
+        )
+
+        write_weighting = get_write_weightings(
+            self._new_state['allocation_gates'],
+            self._new_state['write_gates'],
+            allocation_weightings,
+            write_content_weightings,
+        )
+
+        with tf.variable_scope('write_weighting')
 
         with tf.variable_scope('temporal_memory_linkage')
 
@@ -253,53 +395,6 @@ def read_from_memory(w_r_ts, M_t):
 def write_to_memory(M_prev, w_w_t, e_t, nu_t):
     E = # N \times W matrix of ones.
     M_t = M_prev * (E - vecmul(w_w_t, e_t)) + vecmul(w_w_t, nu_t)
-
-def content_lookup_op(M, k, beta):
-    D = self.cosine_similarity
-    denominator = 0
-    for M_j in M:
-        denominator += exp(D(k, M_j, beta)
-    C = zeros(shape=(N))
-    for i in range(N):
-        C[i] = (
-            exp(D(k, M[i], beta))
-            / denominator
-        )
-    return C
-
-    
-def cosine_similarity(u, v):
-    return (
-        vecmul(u, v)
-        / (norm(u) * norm(v))
-    )
-
-def dynamic_memory_allocation(
-    f_ts, w_r_prevs,
-    u_prev, w_w_prev,
-):
-    psi_t = 1
-    for i in enumerate(f_ts):
-        f_i = f_ts[i]
-        w_r_prev_i = w_r_prevs[i]
-        psi_t *= (1 - vecmul(f_i, w_r_prev_i)
-
-    # u_t \in [0, 1]^N, u_0 = 0
-    u_t = (u_prev + w_w_prev - u_prev * w_w_prev) * psi_t
-
-    phi_t = argsort(u_t)
-    a_t = zeros(shape=(N))
-    for j in range(N):
-        prods = 1
-        for i in range(j):
-            prods *= u_t[phi_t[i]]
-        a_t[phi_t[j]] = (
-            (1 - u_t[phi_t[j]])
-            * prods
-        )
-
-    return a_t
-
 
 
 def get_write_weighting(
