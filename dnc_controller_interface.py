@@ -7,32 +7,38 @@ from utils import (
 
 def build_interface(
     controller_outputs,
-#    minibatch_size,
+    minibatch_size,
     num_read_heads,
     num_write_heads,
     width_memory_row,
     num_memory_row,
     variable_initializer,
 ):
-#    B = minibatch_size
-#    N = num_memory_row
+    B = minibatch_size
+    N = num_memory_row
     W = width_memory_row
     R = num_read_heads
     E = num_write_heads
 
-    interface_dict = {}
+    interface_dict = {
+        'B': minibatch_size,
+        'N': num_memory_row,
+        'W': width_memory_row,
+        'R': num_read_heads,
+        'E': num_write_heads,
+    }
 
     # k^{r, i}_t
     interface_dict['read_keys'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[R, W],
+        outputs_shape=[B, R, W],
         initializer=variable_initializer(),
         name='read_keys',
     )
     # \hat{beta}^{r, i}_t
     interface_dict['read_strengths_pre_oneplus'] = get_linear_outputs(
         controller_outputs,
-        shape=[R],
+        shape=[B, R],
         initializer=variable_initializer(),
         name='read_strength_pre_oneplus',
     )
@@ -43,14 +49,14 @@ def build_interface(
     # k^{w}_t
     interface_dict['write_keys'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[E, W],
+        outputs_shape=[B, E, W],
         initializer=variable_initializer(),
         name='write_keys',
     )
     # \hat{beta}^{w}_t
     interface_dict['write_strength_pre_oneplus'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[E],
+        outputs_shape=[B, E],
         initializer=variable_initializer(),
         name='write_strength_pre_oneplus',
     )
@@ -61,7 +67,7 @@ def build_interface(
     # \hat{e}_t
     interface_dict['erase_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[E, W],
+        outputs_shape=[B, E, W],
         initializer=variable_initializer(),
         name='erase_pre_sigmoid',
     )
@@ -72,14 +78,14 @@ def build_interface(
     # \nu_t
     interface_dict['write'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[E, W],
+        outputs_shape=[B, E, W],
         initializer=variable_initializer(),
         name='write',
     )
     # f^i_t
     interface_dict['free_gates_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[R],
+        outputs_shape=[B, R],
         initializer=variable_initializer(),
         name='free_gates_pre_sigmoid',
     )
@@ -90,7 +96,7 @@ def build_interface(
     # g^a_t
     interface_dict['allocation_gates_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[E],
+        outputs_shape=[B, E],
         initializer=variable_initializer(),
         name='allocation_gates_pre_sigmoid',
     )
@@ -101,7 +107,7 @@ def build_interface(
     # g^w_t
     interface_dict['write_gates_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[E],
+        outputs_shape=[B, E],
         initializer=variable_initializer(),
         name='write_gates_pre_sigmoid',
     )
@@ -113,7 +119,7 @@ def build_interface(
     num_read_modes  = 1 + 2 * E
     interface_dict['read_modes_pre_softmax'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[R, num_read_modes],
+        outputs_shape=[B, R, num_read_modes],
         initializer=variable_initializer(),
         name='read_modes_pre_softmax',
     )

@@ -92,7 +92,10 @@ def read_memory(
     interface_dict,
     t,
 ):
-    # TODO: get shape params using interface_dict.
+    B = interface_dict['B']
+    E = interface_dict['E']
+    N = interface_dict['N']
+    R = interface_dict['R']
 
     # temporal memory link matrix, L_t.
     if t == 0:
@@ -121,13 +124,13 @@ def read_memory(
             prev_temporal_memory_linkage,
         )
         # f_{t}^{i}: [B, R, E, N]
-        read_forward_weighting = get_directional_read_weightings(
+        read_forward_weightings = get_directional_read_weightings(
             temporal_memory_linkage,
             prev_read_weightings,
             forward=True,
         )
         # b_{t}^{i}: [B, R, E, N]
-        read_backward_weighting = get_directional_read_weightings(
+        read_backward_weightings = get_directional_read_weightings(
             temporal_memory_linkage,
             prev_read_weightings,
             forward=False,

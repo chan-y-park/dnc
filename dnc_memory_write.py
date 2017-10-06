@@ -1,6 +1,12 @@
 import tensorflow as tf
 
-from utils import get_content_weightings
+from utils import (
+    batch_invert_permutation,
+    batch_gather,
+    get_content_weightings,
+)
+
+EPSILON = 1e-6
 
 
 def get_usages(
@@ -57,7 +63,7 @@ def get_allocation_weightings(
     return allocation_weightings
 
 
-def get_write_weighting(
+def get_write_weightings(
     allocation_gates,
     write_gates,
     allocation_weightings,
@@ -82,7 +88,12 @@ def write_memory(
     interface_dict,
     t,
 ):
-    # TODO: get shape params using interface_dict.
+    # prev_memory, memory: [B, N, W]
+
+    B = interface_dict['B']
+    R = interface_dict['R']
+    W = interface_dict['W']
+    N = interface_dict['N']
 
     # dynamic_memory_allocation, a_t 
     if t == 0:
@@ -102,12 +113,12 @@ def write_memory(
     # c_{t}^{w}
     write_content_weightings = get_content_weightings(
         interface_dict['write_keys'],
-        memory,
+        prev_memory,
         interface_dict['write_strengths'],
         name='write_content_weightings',
     )
 
-    # w_{t}^{w}
+    # w_{t}^{w}: [B, E, N]
     write_weightings = get_write_weightings(
         interface_dict['allocation_gates'],
         interface_dict['write_gates'],
@@ -115,10 +126,17 @@ def write_memory(
         write_content_weightings,
     )
 
+    # e_{t}: [B, E, W]
     erase_vectors = interface_dict['erase'] 
+    # \nu_{t}: [B, E, W]
     write_vectors = interface_dict['write']
 
-    # TODO: M_t = M_{t-1} \circ (1 - w^w_t e^T_t) + w^w_t \nu_^T_t 
+    # M_t = M_{t-1} \circ (1 - w^w_t e^T_t) + w^w_t \nu_^T_t 
+    memory = (
+        prev_memory
+        * (1 - tf.einsum('ben,bew->bnw', write_weightings, erase_vectors))
+        + tf.einsum('ben,bew->bnw', write_weightings, write_vectors)
+    )
 
     return (
         usages,

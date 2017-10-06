@@ -1,9 +1,10 @@
-import numpy as np
+#import numpy as np
 import tensorflow as tf
 
-from utils import (
-    get_linear_outputs,
-)
+from dnc_controller_interface import build_interface
+from dnc_memory_write import write_memory
+from dnc_memory_read import read_memory
+from utils import get_linear_outputs
 
 EPSILON = 1e-6
 
@@ -44,12 +45,7 @@ class DifferentiableNeuralComputer:
             dtype=tf.float32,
             shape=[B, max_seq_len, input_size]
         )
-        inputs = tf.split(
-            input_seqs,
-            num_or_size_splits=max_seq_len,
-            axis=1,
-        )
-        output_seqs = [None] * max_seq_len
+        outputs = [None] * max_seq_len
 
 #        # M_t
 #        memory = tf.get_variable(
@@ -83,8 +79,10 @@ class DifferentiableNeuralComputer:
             dtype=tf.float32,
         )
         for t in range(max_seq_len):
+            # NOTE: inputs shape = [B, input_size]
+            inputs = input_seqs[:, t, :]
             controller_inputs = tf.concatenate(
-                inputs[t],
+                inputs,
                 prev_read_vectors,
                 axis=1,
             )
@@ -100,7 +98,7 @@ class DifferentiableNeuralComputer:
                 if t > 0:
                     scope.reuse_variables()
 
-                new_interface_dict = build_interface(
+                interface_dict = build_interface(
                     controller_outputs,
                     num_read_heads=R,
                     num_write_heads=E,
@@ -110,7 +108,7 @@ class DifferentiableNeuralComputer:
                 )
 
             # Update memory with erase & write.
-            usage, write_weightings, memory = write_memory(
+            usages, write_weightings, memory = write_memory(
                 prev_read_weightings,
                 prev_write_weightings,
                 prev_usages,
@@ -119,7 +117,7 @@ class DifferentiableNeuralComputer:
                 t,
             )
 
-            (precedence_weighting, temopral_memory_linkage, 
+            (precedence_weighting, temporal_memory_linkage, 
              read_weightings, read_vectors) = read_memory(
                 prev_precedence_weighting,
                 prev_temporal_memory_linkage,
@@ -132,6 +130,7 @@ class DifferentiableNeuralComputer:
 
             # Preparing the next step.
 
+            # NOTE: outputs shape = [B, output_size]
             outputs[t] = controller_outputs + get_linear_outputs(
                 read_vectors,
                 output_shape=controller_outputs.shape.as_list(),
@@ -151,4 +150,10 @@ class DifferentiableNeuralComputer:
 
         # End of sequence for-loop.
 
-    return output_seqs
+        # NOTE: output_seqs shape = [B, max_seq_len, output_size]
+        output_seqs = tf.stack(
+            outputs,
+            axis=1,
+        )
+
+        return output_seqs
