@@ -1,8 +1,9 @@
+import numpy as np
 import tensorflow as tf
 
 def oneplus(tensor, name):
     return tf.add(
-        tf.softplus(tensor),
+        tf.nn.softplus(tensor),
         1.0,
         name=name,
     )
@@ -44,7 +45,7 @@ def get_linear_outputs(
         W = tf.get_variable(
             name='kernel',
             shape=[inputs_size, linear_size],
-            initializer=variable_initializer(),
+            initializer=variable_initializer,
         )
         b = tf.get_variable(
             name='bias',
@@ -62,13 +63,20 @@ def get_linear_outputs(
     return outputs
 
 
-def get_content_weightings(keys, memory, strengths, name=None):
+def get_content_weightings(
+    keys,
+    memory,
+    strengths,
+    epsilon,
+    name=None,
+):
     # keys: [-1, num_heads, W]
     # memory: [-1, N, W]
     # strengths: [-1, num_heads]
 
     # numerator: [-1, num_heads, N]
-    numerator = tf.matmul(
+    numerator = tf.einsum(
+        'bhw,bnw->bhn',
         keys,
         memory,
     )
@@ -84,21 +92,22 @@ def get_content_weightings(keys, memory, strengths, name=None):
             axis=2,
         )
     )
+    # denominator: [-1, num_heads, N]
     denominator = tf.einsum(
         'bh,bn->bhn',
         keys_norm,
         memory_norm,
-    ) + EPSILON
+    ) + epsilon
 
     # cosine_similarity: [-1, num_heads, N]
     cosine_similarity = numerator / denominator
     
     content_weighting_logits = tf.einsum(
-        'bhn,bh->bn',
+        'bhn,bh->bhn',
         cosine_similarity,
         strengths,
     )
-    content_weightings = tf.softmax(
+    content_weightings = tf.nn.softmax(
         content_weighting_logits,
         name=name,
     )

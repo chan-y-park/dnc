@@ -5,6 +5,8 @@ from utils import (
     get_linear_outputs,
 )
 
+
+# TODO: Build a class encapsulating interface parameters.
 def build_interface(
     controller_outputs,
     minibatch_size,
@@ -20,26 +22,28 @@ def build_interface(
     R = num_read_heads
     E = num_write_heads
 
-    interface_dict = {
-        'B': minibatch_size,
-        'N': num_memory_row,
-        'W': width_memory_row,
-        'R': num_read_heads,
-        'E': num_write_heads,
-    }
+#    interface_dict = {
+#        'B': minibatch_size,
+#        'N': num_memory_row,
+#        'W': width_memory_row,
+#        'R': num_read_heads,
+#        'E': num_write_heads,
+#    }
+
+    interface_dict = {}
 
     # k^{r, i}_t
     interface_dict['read_keys'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, R, W],
-        initializer=variable_initializer(),
+        outputs_shape=[R, W],
+        variable_initializer=variable_initializer,
         name='read_keys',
     )
     # \hat{beta}^{r, i}_t
     interface_dict['read_strengths_pre_oneplus'] = get_linear_outputs(
         controller_outputs,
-        shape=[B, R],
-        initializer=variable_initializer(),
+        outputs_shape=[R],
+        variable_initializer=variable_initializer,
         name='read_strength_pre_oneplus',
     )
     interface_dict['read_strengths'] = oneplus(
@@ -49,26 +53,26 @@ def build_interface(
     # k^{w}_t
     interface_dict['write_keys'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, E, W],
-        initializer=variable_initializer(),
+        outputs_shape=[E, W],
+        variable_initializer=variable_initializer,
         name='write_keys',
     )
     # \hat{beta}^{w}_t
-    interface_dict['write_strength_pre_oneplus'] = get_linear_outputs(
+    interface_dict['write_strengths_pre_oneplus'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, E],
-        initializer=variable_initializer(),
-        name='write_strength_pre_oneplus',
+        outputs_shape=[E],
+        variable_initializer=variable_initializer,
+        name='write_strengths_pre_oneplus',
     )
-    interface_dict['write_strength'] = oneplus(
-        interface_dict['write_strength_pre_oneplus'],
-        name='write_strength',
+    interface_dict['write_strengths'] = oneplus(
+        interface_dict['write_strengths_pre_oneplus'],
+        name='write_strengths',
     )
     # \hat{e}_t
     interface_dict['erase_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, E, W],
-        initializer=variable_initializer(),
+        outputs_shape=[E, W],
+        variable_initializer=variable_initializer,
         name='erase_pre_sigmoid',
     )
     interface_dict['erase'] = tf.sigmoid(
@@ -78,15 +82,15 @@ def build_interface(
     # \nu_t
     interface_dict['write'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, E, W],
-        initializer=variable_initializer(),
+        outputs_shape=[E, W],
+        variable_initializer=variable_initializer,
         name='write',
     )
     # f^i_t
     interface_dict['free_gates_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, R],
-        initializer=variable_initializer(),
+        outputs_shape=[R],
+        variable_initializer=variable_initializer,
         name='free_gates_pre_sigmoid',
     )
     interface_dict['free_gates'] = tf.sigmoid(
@@ -96,8 +100,8 @@ def build_interface(
     # g^a_t
     interface_dict['allocation_gates_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, E],
-        initializer=variable_initializer(),
+        outputs_shape=[E],
+        variable_initializer=variable_initializer,
         name='allocation_gates_pre_sigmoid',
     )
     interface_dict['allocation_gates'] = tf.sigmoid(
@@ -107,8 +111,8 @@ def build_interface(
     # g^w_t
     interface_dict['write_gates_pre_sigmoid'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, E],
-        initializer=variable_initializer(),
+        outputs_shape=[E],
+        variable_initializer=variable_initializer,
         name='write_gates_pre_sigmoid',
     )
     interface_dict['write_gates'] = tf.sigmoid(
@@ -119,8 +123,8 @@ def build_interface(
     num_read_modes  = 1 + 2 * E
     interface_dict['read_modes_pre_softmax'] = get_linear_outputs(
         controller_outputs,
-        outputs_shape=[B, R, num_read_modes],
-        initializer=variable_initializer(),
+        outputs_shape=[R, num_read_modes],
+        variable_initializer=variable_initializer,
         name='read_modes_pre_softmax',
     )
     interface_dict['read_modes'] = tf.nn.softmax(

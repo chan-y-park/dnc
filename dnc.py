@@ -6,7 +6,22 @@ from dnc_memory_write import write_memory
 from dnc_memory_read import read_memory
 from utils import get_linear_outputs
 
-EPSILON = 1e-6
+default_config = {
+    'num_read_heads': 4,        # R, number of read heads.
+    'num_write_heads': 1,       # number of write heads = 1 in paper.
+    'num_memory_rows': 16,      # N, number of memory rows.
+    'width_memory_row': 10,     # W, width of a memory row.
+    'controller_num_units': 32,
+    'input_size': 8,
+    'output_size': 8,
+    'max_sequence_length': 5,
+    'minibatch_size': 2,
+    'variable_initializer': {
+        'mean': 0,
+        'stddev': 0.02,
+    },
+    'epsilon': 1e-6,
+}
 
 
 # TODO: Rewrite as a subclass of an RNN class
@@ -14,22 +29,14 @@ EPSILON = 1e-6
 class DifferentiableNeuralComputer:
     def __init__(
         self,
-        input_size,
-        output_size,
     ):
-        self._config = {
-            'num_read_heads': 4,   # R, number of read heads.
-            'num_write_heads': 1,  # number of write heads = 1 in paper.
-            'num_memory_rows': 16,   # N, number of memory rows.
-            'width_memory_row': 16,  # W, width of a memory row.
-            'num_controller_units': 128,
-            'input_size': 128,
-            'output_size': 128,
-        }
-#        self._W_r = # RW \times Y weight matrix
+        self._config = default_config
 
-#    def get_zero_state(self):
-#        return zero_states
+    def _get_variable_initializer(self):
+        return tf.truncated_normal_initializer(
+            dtype=tf.float32,
+            **self._config['variable_initializer']
+        )
 
     def _build_graph(self):
         input_size = self._config['input_size']
@@ -55,13 +62,14 @@ class DifferentiableNeuralComputer:
 #        )
 
         # TODO: Use LSTMBlockCell.
-        controller = tf.nn.rnn_cell.LSTMCell(
-            num_units=self._config['controller_num_units'],
-        )
-        controller_prev_states = controller.zero_state(
-            batch_size=B,
-            dtype=tf.float32,
-        )
+        with tf.variable_scope('controller'):
+            controller = tf.nn.rnn_cell.LSTMCell(
+                num_units=self._config['controller_num_units'],
+            )
+            controller_prev_states = controller.zero_state(
+                batch_size=B,
+                dtype=tf.float32,
+            )
 
         prev_usages = None 
         prev_write_weightings = None 
@@ -70,7 +78,7 @@ class DifferentiableNeuralComputer:
             dtype=tf.float32,
         )
 
-        prev_precedence_weighting = None 
+        prev_precedence_weightings = None 
         prev_temporal_memory_linkage = None 
         prev_read_weightings = None
 
@@ -79,32 +87,39 @@ class DifferentiableNeuralComputer:
             dtype=tf.float32,
         )
         for t in range(max_seq_len):
+            if t == 0:
+                scope_reuse = None 
+            else:
+                scope_reuse = True
+
             # NOTE: inputs shape = [B, input_size]
             inputs = input_seqs[:, t, :]
-            controller_inputs = tf.concatenate(
-                inputs,
+            flattened_prev_read_vectors = tf.reshape(
                 prev_read_vectors,
+                shape=[B, R * W],
+            )
+            controller_inputs = tf.concat(
+                [inputs, flattened_prev_read_vectors],
                 axis=1,
             )
-
-            # controller_outputs = h_t
-            # controller_new_states = s_t
-            controller_outputs, controller_new_states = controller(
-                controller_inputs,
-                controller_prev_states,
-            )
+            
+            with tf.variable_scope('controller', reuse=scope_reuse):
+                # controller_outputs = h_t
+                # controller_new_states = s_t
+                controller_outputs, controller_new_states = controller(
+                    controller_inputs,
+                    controller_prev_states,
+                )
             # new interface parameters, \xi_t.
-            with tf.variable_scope('interface_parameters') as scope:
-                if t > 0:
-                    scope.reuse_variables()
-
+            with tf.variable_scope('interface_parameters', reuse=scope_reuse):
                 interface_dict = build_interface(
                     controller_outputs,
+                    minibatch_size=B,
                     num_read_heads=R,
                     num_write_heads=E,
                     width_memory_row=W,
                     num_memory_row=N,
-                    variable_initializer=self._get_variable_initializer,
+                    variable_initializer=self._get_variable_initializer(),
                 )
 
             # Update memory with erase & write.
@@ -114,17 +129,19 @@ class DifferentiableNeuralComputer:
                 prev_usages,
                 prev_memory,
                 interface_dict,
+                self._config,
                 t,
             )
 
-            (precedence_weighting, temporal_memory_linkage, 
+            (precedence_weightings, temporal_memory_linkage, 
              read_weightings, read_vectors) = read_memory(
-                prev_precedence_weighting,
+                prev_precedence_weightings,
                 prev_temporal_memory_linkage,
                 prev_read_weightings,
                 write_weightings,
                 memory,
                 interface_dict,
+                self._config,
                 t,
             )
 
@@ -132,9 +149,9 @@ class DifferentiableNeuralComputer:
 
             # NOTE: outputs shape = [B, output_size]
             outputs[t] = controller_outputs + get_linear_outputs(
-                read_vectors,
-                output_shape=controller_outputs.shape.as_list(),
-                initializer=self._get_variable_initializer(),
+                tf.reshape(read_vectors, shape=[B, R * W]),
+                outputs_shape=controller_outputs.shape.as_list(),
+                variable_initializer=self._get_variable_initializer(),
                 name='dnc_output_{}'.format(t),
             )
 
@@ -144,7 +161,7 @@ class DifferentiableNeuralComputer:
             prev_write_weightings = write_weightings
             prev_memory = memory
 
-            prev_precedence_weighting = precedence_weighting
+            prev_precedence_weightings = precedence_weightings
             prev_temporal_memory_linkage = temporal_memory_linkage
             prev_read_weightings = read_weightings
 
