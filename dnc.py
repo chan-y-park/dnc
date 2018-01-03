@@ -38,28 +38,12 @@ class DifferentiableNeuralComputer:
             **self._config['variable_initializer']
         )
 
-    def _build_graph(self):
-        input_size = self._config['input_size']
-        output_size = self._config['output_size']
-        max_seq_len = self._config['max_sequence_length']
+    def _build_graph(self, inputs):
         B = minibatch_size = self._config['minibatch_size']
         N = self._config['num_memory_rows']
         W = self._config['width_memory_row']
         R = self._config['num_read_heads']
         E = self._config['num_write_heads']
-
-        input_seqs = tf.placeholder(
-            dtype=tf.float32,
-            shape=[B, max_seq_len, input_size]
-        )
-        outputs = [None] * max_seq_len
-
-#        # M_t
-#        memory = tf.get_variable(
-#            name='memory',
-#            shape=[B, N, W],
-#            initializer=tf.zeros_initializer(dtype=tf.float32),
-#        )
 
         # TODO: Use LSTMBlockCell.
         with tf.variable_scope('controller'):
@@ -86,91 +70,76 @@ class DifferentiableNeuralComputer:
             shape=[B, R, W],
             dtype=tf.float32,
         )
-        for t in range(max_seq_len):
-            if t == 0:
-                scope_reuse = None 
-            else:
-                scope_reuse = True
 
-            # NOTE: inputs shape = [B, input_size]
-            inputs = input_seqs[:, t, :]
-            flattened_prev_read_vectors = tf.reshape(
-                prev_read_vectors,
-                shape=[B, R * W],
-            )
-            controller_inputs = tf.concat(
-                [inputs, flattened_prev_read_vectors],
-                axis=1,
-            )
-            
-            with tf.variable_scope('controller', reuse=scope_reuse):
-                # controller_outputs = h_t
-                # controller_new_states = s_t
-                controller_outputs, controller_new_states = controller(
-                    controller_inputs,
-                    controller_prev_states,
-                )
-            # new interface parameters, \xi_t.
-            with tf.variable_scope('interface_parameters', reuse=scope_reuse):
-                interface_dict = build_interface(
-                    controller_outputs,
-                    minibatch_size=B,
-                    num_read_heads=R,
-                    num_write_heads=E,
-                    width_memory_row=W,
-                    num_memory_row=N,
-                    variable_initializer=self._get_variable_initializer(),
-                )
-
-            # Update memory with erase & write.
-            usages, write_weightings, memory = write_memory(
-                prev_read_weightings,
-                prev_write_weightings,
-                prev_usages,
-                prev_memory,
-                interface_dict,
-                self._config,
-                t,
-            )
-
-            (precedence_weightings, temporal_memory_linkage, 
-             read_weightings, read_vectors) = read_memory(
-                prev_precedence_weightings,
-                prev_temporal_memory_linkage,
-                prev_read_weightings,
-                write_weightings,
-                memory,
-                interface_dict,
-                self._config,
-                t,
-            )
-
-            # Preparing the next step.
-
-            # NOTE: outputs shape = [B, output_size]
-            outputs[t] = controller_outputs + get_linear_outputs(
-                tf.reshape(read_vectors, shape=[B, R * W]),
-                outputs_shape=controller_outputs.shape.as_list(),
-                variable_initializer=self._get_variable_initializer(),
-                name='dnc_output_{}'.format(t),
-            )
-
-            controller_prev_states = controller_new_states
-
-            prev_usages = usages
-            prev_write_weightings = write_weightings
-            prev_memory = memory
-
-            prev_precedence_weightings = precedence_weightings
-            prev_temporal_memory_linkage = temporal_memory_linkage
-            prev_read_weightings = read_weightings
-
-        # End of sequence for-loop.
-
-        # NOTE: output_seqs shape = [B, max_seq_len, output_size]
-        output_seqs = tf.stack(
-            outputs,
+        flattened_prev_read_vectors = tf.reshape(
+            prev_read_vectors,
+            shape=[B, R * W],
+        )
+        controller_inputs = tf.concat(
+            [inputs, flattened_prev_read_vectors],
             axis=1,
         )
+        
+        with tf.variable_scope('controller', reuse=scope_reuse):
+            # controller_outputs = h_t
+            # controller_new_states = s_t
+            controller_outputs, controller_new_states = controller(
+                controller_inputs,
+                controller_prev_states,
+            )
+        # new interface parameters, \xi_t.
+        with tf.variable_scope('interface_parameters', reuse=scope_reuse):
+            interface_dict = build_interface(
+                controller_outputs,
+                minibatch_size=B,
+                num_read_heads=R,
+                num_write_heads=E,
+                width_memory_row=W,
+                num_memory_row=N,
+                variable_initializer=self._get_variable_initializer(),
+            )
 
-        return output_seqs
+        # Update memory with erase & write.
+        usages, write_weightings, memory = write_memory(
+            prev_read_weightings,
+            prev_write_weightings,
+            prev_usages,
+            prev_memory,
+            interface_dict,
+            self._config,
+            t,
+        )
+
+        (precedence_weightings, temporal_memory_linkage, 
+         read_weightings, read_vectors) = read_memory(
+            prev_precedence_weightings,
+            prev_temporal_memory_linkage,
+            prev_read_weightings,
+            write_weightings,
+            memory,
+            interface_dict,
+            self._config,
+            t,
+        )
+
+        # Preparing the next step.
+
+        # NOTE: outputs shape = [B, output_size]
+        outputs = controller_outputs + get_linear_outputs(
+            tf.reshape(read_vectors, shape=[B, R * W]),
+            outputs_shape=controller_outputs.shape.as_list(),
+            variable_initializer=self._get_variable_initializer(),
+            name='dnc_output_{}'.format(t),
+        )
+
+        controller_prev_states = controller_new_states
+
+        prev_usages = usages
+        prev_write_weightings = write_weightings
+        prev_memory = memory
+
+        prev_precedence_weightings = precedence_weightings
+        prev_temporal_memory_linkage = temporal_memory_linkage
+        prev_read_weightings = read_weightings
+
+        return outputs
